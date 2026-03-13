@@ -95,6 +95,18 @@ class ChannelsConfig(BaseModel):
     dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
 
 
+class SandboxConfig(BaseModel):
+    """Sandbox execution configuration."""
+
+    enabled: bool = False
+    image: str = "python:3.11-slim"
+    memory_limit: str = "512m"
+    cpu_limit: float = 1.0
+    network_enabled: bool = False
+    timeout: int = 60
+    max_timeout: int = 300
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
 
@@ -110,6 +122,8 @@ class ToolsConfig(BaseModel):
     shell_timeout: int = 60
     max_output_length: int = 16000
     workspace_path: str | None = None
+    sandbox_enabled: bool = False
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
 
 
 class ServicesConfig(BaseModel):
@@ -200,6 +214,7 @@ __all__ = [
     "MemoryConfig",
     "ChannelsConfig",
     "ToolsConfig",
+    "SandboxConfig",
     "ServicesConfig",
     "TracingConfig",
 ]
