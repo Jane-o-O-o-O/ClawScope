@@ -95,6 +95,12 @@ mcp = ["mcp>=1.0.0"]
 # Sandbox
 sandbox = ["aiodocker>=0.21.0"]
 
+# API Server
+api = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+]
+
 # Memory backends
 redis = ["redis>=5.0.0"]
 sqlalchemy = ["sqlalchemy>=2.0.0", "aiosqlite>=0.19.0"]
@@ -112,6 +118,7 @@ all = [
     "clawscope[realtime]",
     "clawscope[mcp]",
     "clawscope[sandbox]",
+    "clawscope[api]",
     "clawscope[redis]",
     "clawscope[sqlalchemy]",
 ]

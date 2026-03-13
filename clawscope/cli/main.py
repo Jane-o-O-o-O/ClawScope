@@ -162,29 +162,34 @@ def serve(
         "--port", "-p",
         help="API server port",
     ),
+    host: str = typer.Option(
+        "0.0.0.0",
+        "--host", "-h",
+        help="Host to bind",
+    ),
+    reload: bool = typer.Option(
+        False,
+        "--reload",
+        help="Enable auto-reload",
+    ),
 ):
-    """Start ClawScope gateway server."""
-    asyncio.run(_serve(config, port))
-
-
-async def _serve(config_path: Path, port: int):
-    """Run the gateway server."""
-    from clawscope import ClawScope
-
-    typer.echo(f"Starting ClawScope gateway on port {port}...")
-
-    if not config_path.exists():
-        typer.echo(f"Config not found: {config_path}")
-        typer.echo("Run 'clawscope init' first")
-        raise typer.Exit(1)
-
-    app = ClawScope.from_config(config_path)
-
+    """Start ClawScope API server."""
     try:
-        await app.run_forever()
-    except KeyboardInterrupt:
-        typer.echo("\nShutting down...")
-        await app.stop()
+        from clawscope.server import run_server
+
+        typer.echo(f"Starting ClawScope API server on {host}:{port}...")
+
+        config_path = str(config) if config.exists() else None
+        run_server(
+            host=host,
+            port=port,
+            config_path=config_path,
+            reload=reload,
+        )
+
+    except ImportError:
+        typer.echo("Error: FastAPI not installed. Run: pip install clawscope[api]")
+        raise typer.Exit(1)
 
 
 @app.command()
