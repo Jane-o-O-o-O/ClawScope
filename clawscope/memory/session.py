@@ -11,6 +11,7 @@ from typing import Any
 import aiofiles
 from loguru import logger
 
+from clawscope.conversation_context import strip_runtime_context
 from clawscope.memory.base import MemoryBase
 from clawscope.message import Msg
 
@@ -207,7 +208,7 @@ class SessionMemory(MemoryBase):
     async def add(self, messages: list[Msg], mark: str | None = None) -> None:
         """Add messages to session."""
         for msg in messages:
-            content = msg.content
+            content = strip_runtime_context(msg.content)
             if isinstance(content, list):
                 # Convert content blocks to dicts
                 content = [

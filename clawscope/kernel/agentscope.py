@@ -9,8 +9,10 @@ from typing import Any
 
 from clawscope.agent.base import AgentBase
 from clawscope.config import AgentConfig, ModelConfig
+from clawscope.memory import MemoryBase
 from clawscope.message import Msg
 from clawscope.tool import ToolRegistry
+from clawscope.kernel.base import AgentKernel
 
 
 class AgentScopeKernelError(RuntimeError):
@@ -191,6 +193,91 @@ def _build_toolkit(tool_registry: ToolRegistry) -> Any:
     return toolkit
 
 
+class AgentScopeMemoryAdapter:
+    """Adapter that exposes ClawScope memory through AgentScope's API."""
+
+    def __init__(self, memory: MemoryBase):
+        self.memory = memory
+        self._compressed_summary = ""
+
+    async def add(
+        self,
+        memories: Any,
+        marks: str | list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Add AgentScope messages into ClawScope memory."""
+        if memories is None:
+            return
+
+        if not isinstance(memories, list):
+            memories = [memories]
+
+        converted = [_from_agentscope_msg(msg) for msg in memories]
+        mark = marks if isinstance(marks, str) else None
+        await self.memory.add(converted, mark=mark)
+
+    async def get_memory(
+        self,
+        mark: str | None = None,
+        exclude_mark: str | None = None,
+        prepend_summary: bool = True,
+        **kwargs: Any,
+    ) -> list[Any]:
+        """Fetch memory in AgentScope message format."""
+        messages = await self.memory.get(mark=mark)
+        converted = [_to_agentscope_msg(msg) for msg in messages]
+
+        if prepend_summary and self._compressed_summary:
+            ensure_agentscope_importable()
+            from agentscope.message import Msg as AgentScopeMsg
+
+            converted = [
+                AgentScopeMsg(
+                    name="user",
+                    content=self._compressed_summary,
+                    role="user",
+                ),
+                *converted,
+            ]
+
+        return converted
+
+    async def update_compressed_summary(self, summary: str) -> None:
+        """Store compressed summary locally."""
+        self._compressed_summary = summary
+
+    async def clear(self) -> None:
+        """Clear underlying memory."""
+        await self.memory.clear()
+        self._compressed_summary = ""
+
+    async def size(self) -> int:
+        """Report underlying memory size."""
+        return await self.memory.size()
+
+    async def delete(self, msg_ids: list[str], **kwargs: Any) -> int:
+        """Delete is not supported by ClawScope memory backends yet."""
+        return 0
+
+    async def delete_by_mark(
+        self,
+        mark: str | list[str],
+        **kwargs: Any,
+    ) -> int:
+        """Mark-based deletion is not supported by ClawScope memory backends yet."""
+        return 0
+
+    async def update_messages_mark(
+        self,
+        new_mark: str | None,
+        old_mark: str | None = None,
+        msg_ids: list[str] | None = None,
+    ) -> int:
+        """Mark updates are not supported by ClawScope memory backends yet."""
+        return 0
+
+
 class AgentScopeReActAgent(AgentBase):
     """ClawScope agent wrapper around AgentScope's ReAct agent."""
 
@@ -240,15 +327,21 @@ def create_agentscope_react_agent(
     agent_config: AgentConfig,
     model_config: ModelConfig,
     tool_registry: ToolRegistry,
+    memory: MemoryBase | None = None,
 ) -> AgentScopeReActAgent:
     """Create a ClawScope agent backed by AgentScope."""
     ensure_agentscope_importable()
 
     from agentscope.agent import ReActAgent as AgentScopeAgent
-    from agentscope.memory import InMemoryMemory
+    from agentscope.memory import InMemoryMemory as AgentScopeInMemoryMemory
 
     model, formatter = _build_agentscope_model(model_config)
     toolkit = _build_toolkit(tool_registry)
+    wrapped_memory = (
+        AgentScopeMemoryAdapter(memory)
+        if memory is not None
+        else None
+    )
 
     agent = AgentScopeAgent(
         name=agent_config.name,
@@ -256,7 +349,7 @@ def create_agentscope_react_agent(
         model=model,
         formatter=formatter,
         toolkit=toolkit,
-        memory=InMemoryMemory(),
+        memory=wrapped_memory or AgentScopeInMemoryMemory(),
         max_iters=agent_config.max_iterations,
     )
 
@@ -268,8 +361,52 @@ def create_agentscope_react_agent(
     )
 
 
+class AgentScopeKernel(AgentKernel):
+    """Kernel that delegates the agent runtime to AgentScope."""
+
+    def __init__(
+        self,
+        agent_config: AgentConfig,
+        model_config: ModelConfig,
+        tool_registry: ToolRegistry,
+        workspace: Path,
+    ) -> None:
+        super().__init__(
+            agent_config=agent_config,
+            tool_registry=tool_registry,
+            workspace=workspace,
+        )
+        self.model_config = model_config
+
+    def create_agent(
+        self,
+        *,
+        name: str | None = None,
+        sys_prompt: str | None = None,
+        memory: MemoryBase | None = None,
+        max_iterations: int | None = None,
+        **kwargs: Any,
+    ) -> AgentScopeReActAgent:
+        """Create an AgentScope-backed agent."""
+        config = self.agent_config.model_copy(
+            update={
+                "name": name or self.agent_config.name,
+                "sys_prompt": self.build_sys_prompt(sys_prompt),
+                "max_iterations": max_iterations or self.agent_config.max_iterations,
+            },
+        )
+        return create_agentscope_react_agent(
+            agent_config=config,
+            model_config=self.model_config,
+            tool_registry=self.tool_registry,
+            memory=memory,
+        )
+
+
 __all__ = [
+    "AgentScopeKernel",
     "AgentScopeKernelError",
+    "AgentScopeMemoryAdapter",
     "AgentScopeReActAgent",
     "create_agentscope_react_agent",
     "ensure_agentscope_importable",

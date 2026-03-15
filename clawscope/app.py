@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from clawscope.conversation_context import attach_runtime_context
 from clawscope.config import Config
 from clawscope._version import __version__
 
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
     from clawscope.agent import AgentBase, ReActAgent, A2ARouter
     from clawscope.bus import MessageBus
     from clawscope.channels import ChannelManager
+    from clawscope.kernel import AgentKernel
     from clawscope.memory import SessionManager, UnifiedMemory
     from clawscope.model import ModelRegistry
     from clawscope.orchestration import SessionRouter, MsgHub, ChatRoom
@@ -66,6 +68,7 @@ class ClawScope:
         self._default_agent: "AgentBase | None" = None
         self._agents: dict[str, "AgentBase"] = {}
         self._a2a_router: "A2ARouter | None" = None
+        self._kernel: "AgentKernel | None" = None
 
         # RAG
         self._knowledge_bases: dict[str, "KnowledgeBase"] = {}
@@ -258,31 +261,24 @@ class ClawScope:
 
     async def _init_agent_system(self) -> None:
         """Initialize agent system."""
-        from clawscope.agent import ReActAgent, A2ARouter, get_router
+        from clawscope.agent import A2ARouter, get_router
         from clawscope.channels import ChannelManager
         from clawscope.memory import InMemoryMemory
-        from clawscope.kernel import create_agentscope_react_agent
+        from clawscope.kernel import build_kernel
         from clawscope.orchestration import SessionRouter
 
-        # Create default agent
-        if self.config.agent.kernel == "agentscope":
-            self._default_agent = create_agentscope_react_agent(
-                agent_config=self.config.agent,
-                model_config=self.config.model,
-                tool_registry=self._tool_registry,
-            )
-        else:
-            model = self._model_registry.get_model()
-            memory = InMemoryMemory()
+        self._kernel = build_kernel(
+            agent_config=self.config.agent,
+            model_config=self.config.model,
+            model_registry=self._model_registry,
+            tool_registry=self._tool_registry,
+            workspace=self.config.workspace,
+        )
 
-            self._default_agent = ReActAgent(
-                name=self.config.agent.name,
-                sys_prompt=self.config.agent.sys_prompt,
-                model=model,
-                memory=memory,
-                tools=self._tool_registry,
-                max_iterations=self.config.agent.max_iterations,
-            )
+        # Create default agent
+        self._default_agent = self._kernel.create_agent(
+            memory=InMemoryMemory(),
+        )
         self._agents["default"] = self._default_agent
 
         # A2A router
@@ -298,8 +294,7 @@ class ClawScope:
         self._router = SessionRouter(
             bus=self._bus,
             sessions=self._session_manager,
-            model_registry=self._model_registry,
-            tool_registry=self._tool_registry,
+            kernel=self._kernel,
             config=self.config.agent,
         )
 
@@ -489,7 +484,13 @@ class ClawScope:
         if not agent:
             raise ValueError(f"Agent not found: {agent_name}")
 
-        msg = Msg(name="user", content=message, role="user")
+        msg = attach_runtime_context(
+            Msg(name="user", content=message, role="user"),
+            channel="cli",
+            chat_id=session_id or "direct",
+            session_key=session_id or "cli:direct",
+            sender_id="user",
+        )
 
         # Check skills first
         if self._skill_registry:
@@ -760,7 +761,13 @@ async def quick_chat(
         memory=InMemoryMemory(),
     )
 
-    msg = Msg(name="user", content=message, role="user")
+    msg = attach_runtime_context(
+        Msg(name="user", content=message, role="user"),
+        channel="cli",
+        chat_id="quick_chat",
+        session_key="cli:quick_chat",
+        sender_id="user",
+    )
     response = await agent(msg)
 
     return response.get_text_content() if response else ""

@@ -12,9 +12,8 @@ from clawscope.message.adapters import MessageAdapter
 
 if TYPE_CHECKING:
     from clawscope.bus import MessageBus, InboundMessage
+    from clawscope.kernel import AgentKernel
     from clawscope.memory import SessionManager
-    from clawscope.model import ModelRegistry
-    from clawscope.tool import ToolRegistry
     from clawscope.config import AgentConfig
     from clawscope.agent import AgentBase
 
@@ -31,10 +30,8 @@ class SessionRouter:
         self,
         bus: "MessageBus",
         sessions: "SessionManager",
-        model_registry: "ModelRegistry",
-        tool_registry: "ToolRegistry",
+        kernel: "AgentKernel",
         config: "AgentConfig",
-        agent_factory: Callable[..., "AgentBase"] | None = None,
     ):
         """
         Initialize session router.
@@ -42,17 +39,13 @@ class SessionRouter:
         Args:
             bus: Message bus instance
             sessions: Session manager
-            model_registry: Model registry
-            tool_registry: Tool registry
+            kernel: Agent kernel
             config: Agent configuration
-            agent_factory: Optional custom agent factory
         """
         self.bus = bus
         self.sessions = sessions
-        self.model_registry = model_registry
-        self.tool_registry = tool_registry
+        self.kernel = kernel
         self.config = config
-        self.agent_factory = agent_factory or self._default_agent_factory
 
         self._agents: dict[str, "AgentBase"] = {}
         self._running = False
@@ -143,40 +136,14 @@ class SessionRouter:
         from clawscope.memory import SessionMemory
         memory = SessionMemory(session)
 
-        # Get model
-        model = self.model_registry.get_model()
-
-        # Create agent
-        return self.agent_factory(
+        return self.kernel.create_agent(
+            name=self.config.name,
+            sys_prompt=self.config.sys_prompt,
+            memory=memory,
+            max_iterations=self.config.max_iterations,
             session_key=session_key,
             channel=channel,
             chat_id=chat_id,
-            model=model,
-            memory=memory,
-            tools=self.tool_registry,
-            config=self.config,
-        )
-
-    def _default_agent_factory(
-        self,
-        session_key: str,
-        channel: str,
-        chat_id: str,
-        model: Any,
-        memory: Any,
-        tools: Any,
-        config: "AgentConfig",
-    ) -> "AgentBase":
-        """Default agent factory."""
-        from clawscope.agent import ReActAgent
-
-        return ReActAgent(
-            name=config.name,
-            sys_prompt=config.sys_prompt,
-            model=model,
-            memory=memory,
-            tools=tools,
-            max_iterations=config.max_iterations,
         )
 
     def get_active_sessions(self) -> list[str]:

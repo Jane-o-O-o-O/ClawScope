@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from clawscope.conversation_context import attach_runtime_context
 from clawscope.message.base import Msg, TextBlock, ImageBlock
 from clawscope.message.unified import UnifiedMessage
 
@@ -43,7 +44,7 @@ class MessageAdapter:
         else:
             content = inbound.content
 
-        return Msg(
+        msg = Msg(
             name=inbound.sender_id,
             content=content,
             role="user",
@@ -53,6 +54,13 @@ class MessageAdapter:
                 "chat_id": inbound.chat_id,
                 **inbound.metadata,
             },
+        )
+        return attach_runtime_context(
+            msg,
+            channel=inbound.channel,
+            chat_id=inbound.chat_id,
+            session_key=inbound.session_key,
+            sender_id=inbound.sender_id,
         )
 
     @staticmethod

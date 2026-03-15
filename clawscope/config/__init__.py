@@ -206,6 +206,10 @@ class Config(BaseSettings):
         (self.workspace / "memory").mkdir(exist_ok=True)
         (self.workspace / "skills").mkdir(exist_ok=True)
         (self.workspace / "logs").mkdir(exist_ok=True)
+        for filename in ("AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"):
+            path = self.workspace / filename
+            if not path.exists():
+                path.write_text("", encoding="utf-8")
 
 
 __all__ = [

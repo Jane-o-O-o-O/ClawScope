@@ -93,9 +93,10 @@ def chat(
 
 async def _chat(config_path: Path, message: str | None):
     """Run interactive chat."""
+    from clawscope.conversation_context import attach_runtime_context
     from clawscope.config import Config
+    from clawscope.kernel import build_kernel
     from clawscope.model import ModelRegistry
-    from clawscope.agent import ReActAgent
     from clawscope.memory import InMemoryMemory
     from clawscope.tool import ToolRegistry
     from clawscope.message import Msg
@@ -111,21 +112,26 @@ async def _chat(config_path: Path, message: str | None):
     tool_registry = ToolRegistry(config.tools)
     await tool_registry.load_builtin_tools()
 
-    model = model_registry.get_model()
-    memory = InMemoryMemory()
-
-    agent = ReActAgent(
-        name=config.agent.name,
-        sys_prompt=config.agent.sys_prompt,
-        model=model,
-        memory=memory,
-        tools=tool_registry,
-        max_iterations=config.agent.max_iterations,
+    kernel = build_kernel(
+        agent_config=config.agent,
+        model_config=config.model,
+        model_registry=model_registry,
+        tool_registry=tool_registry,
+        workspace=config.workspace,
+    )
+    agent = kernel.create_agent(
+        memory=InMemoryMemory(),
     )
 
     # Single message mode
     if message:
-        msg = Msg(name="User", content=message, role="user")
+        msg = attach_runtime_context(
+            Msg(name="User", content=message, role="user"),
+            channel="cli",
+            chat_id="interactive",
+            session_key="cli:interactive",
+            sender_id="user",
+        )
         response = await agent(msg)
         typer.echo(f"\n{agent.name}: {response.get_text_content()}\n")
         return
@@ -143,7 +149,13 @@ async def _chat(config_path: Path, message: str | None):
         if user_input.lower() in ("exit", "quit", "bye"):
             break
 
-        msg = Msg(name="User", content=user_input, role="user")
+        msg = attach_runtime_context(
+            Msg(name="User", content=user_input, role="user"),
+            channel="cli",
+            chat_id="interactive",
+            session_key="cli:interactive",
+            sender_id="user",
+        )
         response = await agent(msg)
         typer.echo(f"\n{agent.name}: {response.get_text_content()}\n")
 

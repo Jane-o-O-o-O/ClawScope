@@ -16,14 +16,11 @@ Quick Start:
     >>> response = await app.chat("Hello!")
 """
 
-from clawscope._version import __version__
-from clawscope.app import ClawScope, quick_chat, create_agent
-from clawscope.config import Config
+from importlib import import_module
+from typing import Any
 
-# Re-export commonly used components
-from clawscope.message import Msg
-from clawscope.agent import ReActAgent, AgentBase
-from clawscope.memory import InMemoryMemory
+from clawscope._version import __version__
+from clawscope.config import Config
 
 __all__ = [
     # Version
@@ -40,3 +37,26 @@ __all__ = [
     "AgentBase",
     "InMemoryMemory",
 ]
+
+
+_LAZY_IMPORTS = {
+    "ClawScope": ("clawscope.app", "ClawScope"),
+    "quick_chat": ("clawscope.app", "quick_chat"),
+    "create_agent": ("clawscope.app", "create_agent"),
+    "Msg": ("clawscope.message", "Msg"),
+    "ReActAgent": ("clawscope.agent", "ReActAgent"),
+    "AgentBase": ("clawscope.agent", "AgentBase"),
+    "InMemoryMemory": ("clawscope.memory", "InMemoryMemory"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import heavyweight exports on first access."""
+    if name not in _LAZY_IMPORTS:
+        raise AttributeError(f"module 'clawscope' has no attribute {name!r}")
+
+    module_name, attr_name = _LAZY_IMPORTS[name]
+    module = import_module(module_name)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
