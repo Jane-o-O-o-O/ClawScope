@@ -7,12 +7,15 @@ from clawscope.model import ModelRegistry
 from clawscope.tool import ToolRegistry
 
 from clawscope.kernel.base import AgentKernel
+from clawscope.kernel.agent import KernelAgent
 from clawscope.kernel.agentscope import (
+    AgentScopeAgentLoop,
     AgentScopeKernel,
     AgentScopeKernelError,
     AgentScopeReActAgent,
     create_agentscope_react_agent,
 )
+from clawscope.kernel.loop import AgentLoop, LoopConfig, NativeAgentLoop
 from clawscope.kernel.native import NativeKernel
 
 
@@ -42,9 +45,14 @@ def build_kernel(
 
 __all__ = [
     "AgentKernel",
+    "AgentLoop",
+    "AgentScopeAgentLoop",
     "AgentScopeKernel",
     "AgentScopeKernelError",
     "AgentScopeReActAgent",
+    "KernelAgent",
+    "LoopConfig",
+    "NativeAgentLoop",
     "NativeKernel",
     "build_kernel",
     "create_agentscope_react_agent",

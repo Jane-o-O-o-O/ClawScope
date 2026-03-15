@@ -8,6 +8,7 @@ from typing import Any
 
 from clawscope.agent import AgentBase
 from clawscope.config import AgentConfig
+from clawscope.kernel.loop import AgentLoop
 from clawscope.memory import MemoryBase
 from clawscope.tool import ToolRegistry
 from clawscope.workspace_prompt import WorkspacePromptBuilder
@@ -30,6 +31,15 @@ class AgentKernel(ABC):
     def build_sys_prompt(self, base_prompt: str | None = None) -> str:
         """Build the kernel's final system prompt."""
         return self.prompt_builder.build(base_prompt or self.agent_config.sys_prompt)
+
+    def create_loop(
+        self,
+        *,
+        max_iterations: int | None = None,
+        **kwargs: Any,
+    ) -> AgentLoop | None:
+        """Create a kernel-managed reasoning loop when the kernel owns execution."""
+        return None
 
     @abstractmethod
     def create_agent(

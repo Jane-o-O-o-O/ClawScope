@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -108,7 +109,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     global _app_instance
 
-    # Startup – create a default instance only when none was pre-configured
+    # Startup 鈥?create a default instance only when none was pre-configured
     if _app_instance is None:
         logger.info("Starting ClawScope API server...")
         _app_instance = ClawScope.create()
@@ -225,21 +226,19 @@ def _register_routes(app: FastAPI) -> None:
 
         async def generate():
             try:
-                async for chunk in clawscope.stream_chat(
+                async for event in clawscope.stream_chat(
                     message=request.message,
                     agent_name=request.agent,
                     session_id=request.session_id,
                 ):
-                    # ``done`` chunk contains a Msg object – serialise it
-                    if chunk.get("type") == "done" and "message" in chunk:
-                        msg = chunk["message"]
-                        serialisable = {
-                            "type": "done",
-                            "content": msg.get_text_content() if msg else "",
-                        }
-                        yield f"data: {json.dumps(serialisable)}\n\n"
-                    else:
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                    event_type = event.get("type", "content")
+                    payload = dict(event)
+                    if event_type == "done":
+                        message = payload.pop("message", None)
+                        payload["content"] = (
+                            message.get_text_content() if message is not None else ""
+                        )
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
             except Exception as e:
                 logger.error(f"Stream chat error: {e}")
                 yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"

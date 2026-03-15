@@ -7,6 +7,7 @@ from typing import Any
 
 from clawscope.agent import ReActAgent
 from clawscope.config import AgentConfig
+from clawscope.kernel.loop import LoopConfig, NativeAgentLoop
 from clawscope.memory import InMemoryMemory, MemoryBase
 from clawscope.model import ModelRegistry
 from clawscope.tool import ToolRegistry
@@ -31,6 +32,21 @@ class NativeKernel(AgentKernel):
         )
         self.model_registry = model_registry
 
+    def create_loop(
+        self,
+        *,
+        max_iterations: int | None = None,
+        **kwargs: Any,
+    ) -> NativeAgentLoop:
+        """Create the kernel-owned native reasoning loop."""
+        max_tokens = int(kwargs.pop("max_tokens", self.agent_config.max_tokens))
+        return NativeAgentLoop(
+            LoopConfig(
+                max_iterations=max_iterations or self.agent_config.max_iterations,
+                max_tokens=max_tokens,
+            )
+        )
+
     def create_agent(
         self,
         *,
@@ -42,6 +58,11 @@ class NativeKernel(AgentKernel):
     ) -> ReActAgent:
         """Create a native ClawScope ReAct agent."""
         model = kwargs.pop("model", None) or self.model_registry.get_model()
+        loop = kwargs.pop("loop", None) or self.create_loop(
+            max_iterations=max_iterations,
+            **kwargs,
+        )
+        max_tokens = int(kwargs.pop("max_tokens", self.agent_config.max_tokens))
 
         return ReActAgent(
             name=name or self.agent_config.name,
@@ -50,6 +71,8 @@ class NativeKernel(AgentKernel):
             memory=memory or InMemoryMemory(),
             tools=self.tool_registry,
             max_iterations=max_iterations or self.agent_config.max_iterations,
+            max_tokens=max_tokens,
+            loop=loop,
             **kwargs,
         )
 

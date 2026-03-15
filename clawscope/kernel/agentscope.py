@@ -9,6 +9,8 @@ from typing import Any
 
 from clawscope.agent.base import AgentBase
 from clawscope.config import AgentConfig, ModelConfig
+from clawscope.kernel.agent import KernelAgent
+from clawscope.kernel.loop import AgentLoop, LoopConfig
 from clawscope.memory import MemoryBase
 from clawscope.message import Msg
 from clawscope.tool import ToolRegistry
@@ -278,29 +280,45 @@ class AgentScopeMemoryAdapter:
         return 0
 
 
-class AgentScopeReActAgent(AgentBase):
+class AgentScopeAgentLoop(AgentLoop):
+    """Kernel-managed loop wrapper for AgentScope's runtime."""
+
+    def __init__(self, config: LoopConfig, runtime_agent: Any) -> None:
+        super().__init__(config)
+        self.runtime_agent = runtime_agent
+
+    async def run(
+        self,
+        agent: AgentBase,
+        message: Msg | None = None,
+        **kwargs: Any,
+    ) -> Msg:
+        response = await self.runtime_agent(_to_agentscope_msg(message), **kwargs)
+        return _from_agentscope_msg(response)
+
+
+class AgentScopeReActAgent(KernelAgent):
     """ClawScope agent wrapper around AgentScope's ReAct agent."""
 
     def __init__(
         self,
         name: str,
         sys_prompt: str,
+        loop: AgentScopeAgentLoop,
         agent: Any,
         tools: ToolRegistry | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(name=name, sys_prompt=sys_prompt, tools=tools, **kwargs)
+        super().__init__(
+            loop=loop,
+            name=name,
+            sys_prompt=sys_prompt,
+            tools=tools,
+            **kwargs,
+        )
         self._agent = agent
-
-    async def reply(self, message: Msg | None = None, **kwargs: Any) -> Msg:
-        """Generate a reply via AgentScope."""
-        kwargs = await self._run_pre_reply_hooks(message=message, **kwargs)
-        message = kwargs.pop("message", message)
-
-        response = await self._agent(_to_agentscope_msg(message), **kwargs)
-        result = _from_agentscope_msg(response)
-        result = await self._run_post_reply_hooks(result) or result
-        return result
+        self.max_iterations = self.loop.config.max_iterations
+        self.max_tokens = self.loop.config.max_tokens
 
     async def observe(self, message: Msg | list[Msg] | None) -> None:
         """Forward observed messages into AgentScope memory."""
@@ -323,13 +341,13 @@ class AgentScopeReActAgent(AgentBase):
             await hook(message=message)
 
 
-def create_agentscope_react_agent(
+def _build_agentscope_runtime_agent(
     agent_config: AgentConfig,
     model_config: ModelConfig,
     tool_registry: ToolRegistry,
     memory: MemoryBase | None = None,
-) -> AgentScopeReActAgent:
-    """Create a ClawScope agent backed by AgentScope."""
+) -> Any:
+    """Build the underlying AgentScope runtime agent."""
     ensure_agentscope_importable()
 
     from agentscope.agent import ReActAgent as AgentScopeAgent
@@ -343,7 +361,7 @@ def create_agentscope_react_agent(
         else None
     )
 
-    agent = AgentScopeAgent(
+    return AgentScopeAgent(
         name=agent_config.name,
         sys_prompt=agent_config.sys_prompt,
         model=model,
@@ -353,10 +371,33 @@ def create_agentscope_react_agent(
         max_iters=agent_config.max_iterations,
     )
 
+
+def create_agentscope_react_agent(
+    agent_config: AgentConfig,
+    model_config: ModelConfig,
+    tool_registry: ToolRegistry,
+    memory: MemoryBase | None = None,
+) -> AgentScopeReActAgent:
+    """Create a ClawScope agent backed by AgentScope."""
+    runtime_agent = _build_agentscope_runtime_agent(
+        agent_config=agent_config,
+        model_config=model_config,
+        tool_registry=tool_registry,
+        memory=memory,
+    )
+    loop = AgentScopeAgentLoop(
+        LoopConfig(
+            max_iterations=agent_config.max_iterations,
+            max_tokens=agent_config.max_tokens,
+        ),
+        runtime_agent=runtime_agent,
+    )
+
     return AgentScopeReActAgent(
         name=agent_config.name,
         sys_prompt=agent_config.sys_prompt,
-        agent=agent,
+        loop=loop,
+        agent=runtime_agent,
         tools=tool_registry,
     )
 
@@ -378,6 +419,23 @@ class AgentScopeKernel(AgentKernel):
         )
         self.model_config = model_config
 
+    def create_loop(
+        self,
+        *,
+        max_iterations: int | None = None,
+        **kwargs: Any,
+    ) -> AgentLoop:
+        """Create an AgentScope-backed loop around a runtime agent."""
+        runtime_agent = kwargs.pop("runtime_agent")
+        max_tokens = int(kwargs.pop("max_tokens", self.agent_config.max_tokens))
+        return AgentScopeAgentLoop(
+            LoopConfig(
+                max_iterations=max_iterations or self.agent_config.max_iterations,
+                max_tokens=max_tokens,
+            ),
+            runtime_agent=runtime_agent,
+        )
+
     def create_agent(
         self,
         *,
@@ -393,21 +451,36 @@ class AgentScopeKernel(AgentKernel):
                 "name": name or self.agent_config.name,
                 "sys_prompt": self.build_sys_prompt(sys_prompt),
                 "max_iterations": max_iterations or self.agent_config.max_iterations,
+                "max_tokens": int(kwargs.get("max_tokens", self.agent_config.max_tokens)),
             },
         )
-        return create_agentscope_react_agent(
+        runtime_agent = _build_agentscope_runtime_agent(
             agent_config=config,
             model_config=self.model_config,
             tool_registry=self.tool_registry,
             memory=memory,
+        )
+        loop = kwargs.pop("loop", None) or self.create_loop(
+            max_iterations=config.max_iterations,
+            max_tokens=config.max_tokens,
+            runtime_agent=runtime_agent,
+        )
+        return AgentScopeReActAgent(
+            name=config.name,
+            sys_prompt=config.sys_prompt,
+            loop=loop,
+            agent=runtime_agent,
+            tools=self.tool_registry,
         )
 
 
 __all__ = [
     "AgentScopeKernel",
     "AgentScopeKernelError",
+    "AgentScopeAgentLoop",
     "AgentScopeMemoryAdapter",
     "AgentScopeReActAgent",
+    "_build_agentscope_runtime_agent",
     "create_agentscope_react_agent",
     "ensure_agentscope_importable",
 ]

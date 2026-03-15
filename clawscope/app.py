@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from loguru import logger
 
@@ -498,7 +498,7 @@ class ClawScope:
         if self._router is not None:
             self._router.register_sub_agent(key, agent)
         else:
-            # Platform not started yet – store for later pickup
+            # Platform not started yet 鈥?store for later pickup
             if not hasattr(self, "_pending_sub_agents"):
                 self._pending_sub_agents: dict[str, "AgentBase"] = {}
             self._pending_sub_agents[key] = agent  # type: ignore[attr-defined]
@@ -555,19 +555,17 @@ class ClawScope:
         message: str,
         agent_name: str = "default",
         session_id: str | None = None,
-    ):
+    ) -> AsyncIterator[dict[str, Any]]:
         """
-        Stream a chat response as an async generator.
+        Stream a chat response when the selected agent supports it.
 
-        Yields dicts with ``type`` key:
-        - ``{"type": "content", "content": str}`` – partial text
-        - ``{"type": "thinking", "content": str}`` – reasoning token (if supported)
-        - ``{"type": "tool_start", "tool_name": str, "tool_id": str}``
-        - ``{"type": "tool_result", "tool_id": str, "content": str, "is_error": bool}``
-        - ``{"type": "done", "message": Msg}`` – final assembled message
+        Args:
+            message: User message
+            agent_name: Agent to use
+            session_id: Session identifier
 
-        Falls back to a single non-streamed chunk when the agent doesn't support
-        ``stream_reply``.
+        Yields:
+            Stream events from the agent loop
         """
         from clawscope.message import Msg
 
@@ -583,13 +581,23 @@ class ClawScope:
             sender_id="user",
         )
 
-        if hasattr(agent, "stream_reply"):
-            async for chunk in agent.stream_reply(msg):
-                yield chunk
-        else:
-            response = await agent(msg)
-            text = response.get_text_content() if response else ""
-            yield {"type": "content", "content": text}
+        if self._skill_registry:
+            skill_response = await self._skill_registry.execute(msg)
+            if skill_response:
+                text = skill_response.get_text_content()
+                yield {"type": "content", "content": text}
+                yield {"type": "done", "message": skill_response}
+                return
+
+        stream_reply = getattr(agent, "stream_reply", None)
+        if callable(stream_reply):
+            async for event in stream_reply(msg):
+                yield event
+            return
+
+        response = await agent(msg)
+        if response:
+            yield {"type": "content", "content": response.get_text_content()}
             yield {"type": "done", "message": response}
 
     # ==================== Multi-Agent Orchestration ====================
@@ -834,22 +842,26 @@ async def quick_chat(
     Returns:
         Response text
     """
-    from clawscope.agent import ReActAgent
+    from clawscope.config import AgentConfig, ModelConfig, ToolsConfig
+    from clawscope.kernel import build_kernel
     from clawscope.memory import InMemoryMemory
     from clawscope.message import Msg
     from clawscope.model import ModelRegistry
-    from clawscope.config import ModelConfig
+    from clawscope.tool import ToolRegistry
 
+    workspace = Path.home() / ".clawscope" / "workspace"
     model_config = ModelConfig(default_model=model)
+    agent_config = AgentConfig(sys_prompt=system_prompt or "You are a helpful assistant.")
     registry = ModelRegistry(model_config)
-    llm = registry.get_model()
-
-    agent = ReActAgent(
-        name="Assistant",
-        sys_prompt=system_prompt or "You are a helpful assistant.",
-        model=llm,
-        memory=InMemoryMemory(),
+    tool_registry = ToolRegistry(ToolsConfig())
+    kernel = build_kernel(
+        agent_config=agent_config,
+        model_config=model_config,
+        model_registry=registry,
+        tool_registry=tool_registry,
+        workspace=workspace,
     )
+    agent = kernel.create_agent(memory=InMemoryMemory())
 
     msg = attach_runtime_context(
         Msg(name="user", content=message, role="user"),
@@ -881,25 +893,28 @@ def create_agent(
     Returns:
         ReActAgent instance
     """
-    from clawscope.agent import ReActAgent
+    from clawscope.config import AgentConfig, ModelConfig, ToolsConfig
+    from clawscope.kernel import build_kernel
     from clawscope.memory import InMemoryMemory
     from clawscope.model import ModelRegistry
     from clawscope.tool import ToolRegistry
-    from clawscope.config import ModelConfig, ToolsConfig
 
+    workspace = Path.home() / ".clawscope" / "workspace"
     model_config = ModelConfig(default_model=model)
-    registry = ModelRegistry(model_config)
-    llm = registry.get_model()
-
-    tool_registry = ToolRegistry(ToolsConfig())
-
-    return ReActAgent(
+    agent_config = AgentConfig(
         name=name,
         sys_prompt=system_prompt or "You are a helpful assistant.",
-        model=llm,
-        memory=InMemoryMemory(),
-        tools=tool_registry,
     )
+    registry = ModelRegistry(model_config)
+    tool_registry = ToolRegistry(ToolsConfig())
+    kernel = build_kernel(
+        agent_config=agent_config,
+        model_config=model_config,
+        model_registry=registry,
+        tool_registry=tool_registry,
+        workspace=workspace,
+    )
+    return kernel.create_agent(memory=InMemoryMemory())
 
 
 __all__ = [
