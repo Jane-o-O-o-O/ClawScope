@@ -261,20 +261,28 @@ class ClawScope:
         from clawscope.agent import ReActAgent, A2ARouter, get_router
         from clawscope.channels import ChannelManager
         from clawscope.memory import InMemoryMemory
+        from clawscope.kernel import create_agentscope_react_agent
         from clawscope.orchestration import SessionRouter
 
         # Create default agent
-        model = self._model_registry.get_model()
-        memory = InMemoryMemory()
+        if self.config.agent.kernel == "agentscope":
+            self._default_agent = create_agentscope_react_agent(
+                agent_config=self.config.agent,
+                model_config=self.config.model,
+                tool_registry=self._tool_registry,
+            )
+        else:
+            model = self._model_registry.get_model()
+            memory = InMemoryMemory()
 
-        self._default_agent = ReActAgent(
-            name=self.config.agent.name,
-            sys_prompt=self.config.agent.sys_prompt,
-            model=model,
-            memory=memory,
-            tools=self._tool_registry,
-            max_iterations=self.config.agent.max_iterations,
-        )
+            self._default_agent = ReActAgent(
+                name=self.config.agent.name,
+                sys_prompt=self.config.agent.sys_prompt,
+                model=model,
+                memory=memory,
+                tools=self._tool_registry,
+                max_iterations=self.config.agent.max_iterations,
+            )
         self._agents["default"] = self._default_agent
 
         # A2A router

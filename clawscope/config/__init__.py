@@ -27,6 +27,7 @@ class AgentConfig(BaseModel):
     """Agent configuration."""
 
     type: Literal["react", "user", "realtime", "a2a"] = "react"
+    kernel: Literal["native", "agentscope"] = "native"
     name: str = "ClawScope"
     sys_prompt: str = "You are a helpful AI assistant."
     max_iterations: int = 40
