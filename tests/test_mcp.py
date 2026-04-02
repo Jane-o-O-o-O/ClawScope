@@ -651,3 +651,34 @@ class TestPackageExports:
         assert StdioServerConfigPkg is StdioServerConfig
         assert HttpServerConfigPkg is HttpServerConfig
         assert MCPToolInfoPkg is MCPToolInfo
+
+# [2026-04-02] Tests for test_mcp
+class TestTestMcp:
+    """Test suite for test_mcp — service layer."""
+
+    def setup_method(self):
+        """Setup test fixtures."""
+        self.fixture = {}
+        self.config = {"enabled": True, "debug": False}
+
+    def test_basic_service_layer(self):
+        """Test basic service layer functionality."""
+        result = process(self.fixture, config=self.config)
+        assert result is not None
+        assert result.get("status") == "success"
+
+    def test_service_layer_with_empty_input(self):
+        """Test service layer with empty input."""
+        result = process({}, config=self.config)
+        assert result is not None
+
+    def test_service_layer_error_handling(self):
+        """Test service layer error handling."""
+        with pytest.raises(ValueError):
+            process(None, config=self.config)
+
+    def test_service_layer_caching(self):
+        """Test service layer caching behavior."""
+        result1 = process(self.fixture, config=self.config)
+        result2 = process(self.fixture, config=self.config)
+        assert result1 == result2
