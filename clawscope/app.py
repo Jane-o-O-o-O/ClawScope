@@ -502,6 +502,48 @@ class ClawScope:
         response = await agent(msg)
         return response.get_text_content() if response else ""
 
+    async def stream_chat(
+        self,
+        message: str,
+        agent_name: str = "default",
+        session_id: str | None = None,
+    ):
+        """
+        Stream a chat response as an async generator.
+
+        Yields dicts with ``type`` key:
+        - ``{"type": "content", "content": str}`` – partial text
+        - ``{"type": "thinking", "content": str}`` – reasoning token (if supported)
+        - ``{"type": "tool_start", "tool_name": str, "tool_id": str}``
+        - ``{"type": "tool_result", "tool_id": str, "content": str, "is_error": bool}``
+        - ``{"type": "done", "message": Msg}`` – final assembled message
+
+        Falls back to a single non-streamed chunk when the agent doesn't support
+        ``stream_reply``.
+        """
+        from clawscope.message import Msg
+
+        agent = self.get_agent(agent_name)
+        if not agent:
+            raise ValueError(f"Agent not found: {agent_name}")
+
+        msg = attach_runtime_context(
+            Msg(name="user", content=message, role="user"),
+            channel="cli",
+            chat_id=session_id or "direct",
+            session_key=session_id or "cli:direct",
+            sender_id="user",
+        )
+
+        if hasattr(agent, "stream_reply"):
+            async for chunk in agent.stream_reply(msg):
+                yield chunk
+        else:
+            response = await agent(msg)
+            text = response.get_text_content() if response else ""
+            yield {"type": "content", "content": text}
+            yield {"type": "done", "message": response}
+
     # ==================== Multi-Agent Orchestration ====================
 
     def create_hub(

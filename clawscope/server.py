@@ -108,9 +108,10 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     global _app_instance
 
-    # Startup
-    logger.info("Starting ClawScope API server...")
-    _app_instance = ClawScope.create()
+    # Startup – create a default instance only when none was pre-configured
+    if _app_instance is None:
+        logger.info("Starting ClawScope API server...")
+        _app_instance = ClawScope.create()
     await _app_instance.start()
 
     yield
@@ -146,7 +147,7 @@ def create_api(
         title=title,
         description="ClawScope - Unified AI Agent Platform API",
         version=__version__,
-        lifespan=lifespan if not clawscope_app else None,
+        lifespan=lifespan,
     )
 
     # CORS
@@ -213,28 +214,42 @@ def _register_routes(app: FastAPI) -> None:
         """
         Stream chat response (SSE).
 
-        Returns server-sent events.
+        Each event is a JSON-encoded chunk.  Possible ``type`` values:
+        ``content``, ``thinking``, ``tool_start``, ``tool_result``, ``done``, ``error``.
+        The stream ends with the sentinel line ``data: [DONE]``.
         """
+        import json
         from fastapi.responses import StreamingResponse
 
         clawscope = get_app()
 
         async def generate():
             try:
-                response = await clawscope.chat(
+                async for chunk in clawscope.stream_chat(
                     message=request.message,
                     agent_name=request.agent,
-                )
-                # For now, return full response
-                # TODO: Implement actual streaming
-                yield f"data: {response}\n\n"
-                yield "data: [DONE]\n\n"
+                    session_id=request.session_id,
+                ):
+                    # ``done`` chunk contains a Msg object – serialise it
+                    if chunk.get("type") == "done" and "message" in chunk:
+                        msg = chunk["message"]
+                        serialisable = {
+                            "type": "done",
+                            "content": msg.get_text_content() if msg else "",
+                        }
+                        yield f"data: {json.dumps(serialisable)}\n\n"
+                    else:
+                        yield f"data: {json.dumps(chunk)}\n\n"
             except Exception as e:
-                yield f"data: Error: {e}\n\n"
+                logger.error(f"Stream chat error: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            finally:
+                yield "data: [DONE]\n\n"
 
         return StreamingResponse(
             generate(),
             media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     # ==================== Agents ====================
