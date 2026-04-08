@@ -347,7 +347,7 @@ def _register_one(
         name=registered_name,
         description=tool_info.description,
         parameters=params,
-        function=_call,
+        func=_call,
         enabled=True,
     )
 
