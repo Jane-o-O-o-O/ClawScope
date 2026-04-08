@@ -136,6 +136,7 @@ dev = [
 
 [project.scripts]
 clawscope = "clawscope.cli.main:main"
+clawscope-mcp = "clawscope.mcp.server:run_stdio_cli"
 
 [project.urls]
 Homepage = "https://github.com/Jane-o-O-o-O/ClawScope"
