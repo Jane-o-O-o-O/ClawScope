@@ -83,7 +83,7 @@ class MCPToolInfo:
     """Lightweight descriptor for a tool exposed by an MCP server."""
 
     name: str
-    description: str
+    description: str = ""
     input_schema: dict[str, Any] = field(default_factory=dict)
 
     @classmethod

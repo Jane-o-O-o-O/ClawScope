@@ -164,7 +164,7 @@ class MCPSkill(Skill):
             category=category,
             triggers=triggers or [],
             priority=priority,
-            metadata={"mcp_server": client.name, "mcp_tool": tool_name},
+            tags=[f"mcp:{client.name}", f"tool:{tool_name}"],
         )
         return cls(client, tool_name, config, argument_mapper)
 

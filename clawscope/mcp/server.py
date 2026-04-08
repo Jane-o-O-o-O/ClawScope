@@ -201,7 +201,7 @@ class MCPServer:
         """List all tool names that will be advertised to MCP clients."""
         names = list(self.tool_registry.list_tools())
         if self.skill_registry:
-            names += [f"skill_{s}" for s in self.skill_registry.list_skills()]
+            names += [f"skill_{s.name}" for s in self.skill_registry.list_skills()]
         return names
 
 
@@ -235,14 +235,11 @@ def _build_tool_list(
 
     # Skills (exposed as "skill_{name}" tools)
     if skill_registry:
-        for skill_name in skill_registry.list_skills():
-            skill = skill_registry.get(skill_name)
-            if skill is None:
-                continue
+        for skill in skill_registry.list_skills():
             result.append(
                 types.Tool(
-                    name=f"skill_{skill_name}",
-                    description=getattr(skill.config, "description", skill_name),
+                    name=f"skill_{skill.name}",
+                    description=getattr(skill.config, "description", skill.name),
                     inputSchema={
                         "type": "object",
                         "properties": {
