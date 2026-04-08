@@ -298,6 +298,13 @@ class ClawScope:
             config=self.config.agent,
         )
 
+        # Flush any sub-agents registered before start()
+        pending = getattr(self, "_pending_sub_agents", {})
+        for sub_name, sub_agent in pending.items():
+            self._router.register_sub_agent(sub_name, sub_agent)
+        if pending:
+            logger.info(f"Flushed {len(pending)} pending sub-agent(s) to SessionRouter")
+
         logger.debug("Agent system initialized")
 
     async def _init_rag_system(self) -> None:
@@ -456,6 +463,47 @@ class ClawScope:
                 self._a2a_router.register(agent)
 
         logger.info(f"Registered agent: {name}")
+
+    def register_sub_agent(
+        self,
+        agent: "AgentBase",
+        name: str | None = None,
+    ) -> None:
+        """
+        Register a sub-agent that the orchestrator will automatically delegate to.
+
+        Once at least one sub-agent is registered, every new channel session
+        will receive an :class:`~clawscope.agent.OrchestratorAgent` (instead of
+        a plain ReActAgent) whose LLM autonomously decides which sub-agents to
+        call based on the incoming message.
+
+        Existing sessions are not affected; only sessions created *after* this
+        call will use the orchestrator.
+
+        Args:
+            agent: The sub-agent to register.
+            name: Logical key used as the tool name (``ask_<name>``).
+                  Defaults to ``agent.name``.
+
+        Example::
+
+            researcher = ReActAgent(name="researcher", sys_prompt="...", ...)
+            writer     = ReActAgent(name="writer",     sys_prompt="...", ...)
+
+            app.register_sub_agent(researcher)
+            app.register_sub_agent(writer)
+            # Future channel messages are handled by OrchestratorAgent
+        """
+        key = name or agent.name
+        if self._router is not None:
+            self._router.register_sub_agent(key, agent)
+        else:
+            # Platform not started yet – store for later pickup
+            if not hasattr(self, "_pending_sub_agents"):
+                self._pending_sub_agents: dict[str, "AgentBase"] = {}
+            self._pending_sub_agents[key] = agent  # type: ignore[attr-defined]
+
+        logger.info(f"Registered sub-agent: '{key}'")
 
     def get_agent(self, name: str = "default") -> "AgentBase | None":
         """Get an agent by name."""
