@@ -114,6 +114,13 @@ class SessionRouter:
             # Get or create agent for this session
             agent = await self._get_or_create_agent(session_key, inbound.channel, inbound.chat_id)
 
+            # Inject a fresh ProgressReporter so progress goes to this exact chat
+            from clawscope.agent.orchestrator import OrchestratorAgent, ProgressReporter
+            if isinstance(agent, OrchestratorAgent):
+                agent.set_progress_reporter(
+                    ProgressReporter(self.bus, inbound.channel, inbound.chat_id)
+                )
+
             # Convert to Msg
             msg = MessageAdapter.inbound_to_msg(inbound)
 
