@@ -86,9 +86,95 @@ class SpeakingPolicy:
         participants: list[ChatParticipant],
         history: list[Msg],
     ) -> ChatParticipant | None:
-        """LLM decides who should speak next."""
-        # This is a placeholder - actual implementation would
-        # call the model to determine next speaker
+        """
+        Ask the LLM to choose the next speaker.
+
+        The model receives a brief summary of the conversation and the list of
+        available participants, then returns the name of who should speak next.
+        Falls back to round-robin if the model is unavailable or returns an
+        unrecognised name.
+
+        Args:
+            model: A ``ChatModelBase`` instance (or any object with a synchronous
+                   ``chat()`` or ``__call__`` method that accepts a list of dicts).
+            participants: Active, non-muted participants to choose from.
+            history: Full conversation history so far.
+
+        Returns:
+            The chosen ``ChatParticipant``, or ``None`` if no participants exist.
+        """
+        if not participants:
+            return None
+
+        if model is None:
+            return SpeakingPolicy.round_robin(participants, history)
+
+        names = [p.agent.name for p in participants]
+        names_str = ", ".join(names)
+
+        # Build a short conversation snippet (last 6 messages max)
+        recent = history[-6:]
+        snippet = "\n".join(
+            f"{m.name}: {m.get_text_content()[:120]}" for m in recent
+        )
+
+        prompt = (
+            f"You are a conversation moderator.\n\n"
+            f"Participants: {names_str}\n\n"
+            f"Recent conversation:\n{snippet}\n\n"
+            f"Who should speak next? Reply with ONLY one of the participant names "
+            f"listed above and nothing else."
+        )
+
+        try:
+            # Support both coroutine-based (async) and plain synchronous models.
+            import asyncio
+            import inspect
+
+            messages = [{"role": "user", "content": prompt}]
+
+            if hasattr(model, "chat"):
+                result = model.chat(messages)
+                if inspect.isawaitable(result):
+                    # Synchronous context – run in a new loop or existing one
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # Can't block a running loop; fall back
+                            return SpeakingPolicy.round_robin(participants, history)
+                        response = loop.run_until_complete(result)
+                    except RuntimeError:
+                        response = asyncio.run(result)
+                else:
+                    response = result
+
+                # Extract text from response
+                chosen_name: str = ""
+                if hasattr(response, "get_text_content"):
+                    chosen_name = response.get_text_content().strip()
+                elif hasattr(response, "content"):
+                    chosen_name = str(response.content).strip()
+                else:
+                    chosen_name = str(response).strip()
+            else:
+                # Callable fallback (e.g. a plain function)
+                chosen_name = str(model(prompt)).strip()
+
+            # Match to a known participant (case-insensitive)
+            chosen_name_lower = chosen_name.lower()
+            for p in participants:
+                if p.agent.name.lower() == chosen_name_lower:
+                    logger.debug(f"LLM selected next speaker: {p.agent.name}")
+                    return p
+
+            logger.warning(
+                f"LLM returned unknown speaker name {chosen_name!r}; "
+                "falling back to round-robin"
+            )
+
+        except Exception as exc:
+            logger.error(f"SpeakingPolicy.llm_decided error: {exc}; falling back")
+
         return SpeakingPolicy.round_robin(participants, history)
 
 
