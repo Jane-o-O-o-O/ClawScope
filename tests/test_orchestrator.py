@@ -362,3 +362,139 @@ class TestClawScopeRegisterSubAgent:
         sub = _make_sub_agent("autoname", "ok")
         app.register_sub_agent(sub)
         mock_router.register_sub_agent.assert_called_once_with("autoname", sub)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic agent creation – spawn_agent
+# ---------------------------------------------------------------------------
+
+
+class TestSpawnAgent:
+    def _make_orch_with_model(self):
+        """OrchestratorAgent whose model always returns a fixed reply."""
+        from unittest.mock import AsyncMock as AM
+        from clawscope.memory import InMemoryMemory
+
+        model = MagicMock()
+        # chat() returns a Msg with text content
+        reply_msg = Msg(name="spawned", content="spawned reply", role="assistant")
+        model.chat = AM(return_value=reply_msg)
+
+        orch = OrchestratorAgent(
+            name="Orch",
+            model=model,
+            memory=InMemoryMemory(),
+        )
+        return orch, model
+
+    def test_spawn_agent_tool_registered(self):
+        orch = _make_orchestrator()
+        assert "spawn_agent" in orch.tools._tools
+
+    def test_create_agent_tool_registered(self):
+        orch = _make_orchestrator()
+        assert "create_agent" in orch.tools._tools
+
+    def test_list_agents_tool_registered(self):
+        orch = _make_orchestrator()
+        assert "list_agents" in orch.tools._tools
+
+    async def test_list_agents_empty(self):
+        orch = _make_orchestrator()
+        tool = orch.tools._tools["list_agents"]
+        result = await tool.func()
+        assert "no sub-agents" in result.lower()
+
+    async def test_list_agents_shows_registered(self):
+        sub = _make_sub_agent("helper", "help")
+        orch = _make_orchestrator(sub_agents=[sub])
+        tool = orch.tools._tools["list_agents"]
+        result = await tool.func()
+        assert "helper" in result
+
+    async def test_create_agent_registers_new_agent(self):
+        orch = _make_orchestrator()
+        tool = orch.tools._tools["create_agent"]
+        result = await tool.func(name="analyst", role="You are a data analyst.")
+        assert "analyst" in orch.sub_agents
+        assert "ask_analyst" in orch.tools._tools
+        assert "analyst" in result
+
+    async def test_create_agent_duplicate_name_returns_error(self):
+        sub = _make_sub_agent("existing", "ok")
+        orch = _make_orchestrator(sub_agents=[sub])
+        tool = orch.tools._tools["create_agent"]
+        result = await tool.func(name="existing", role="Another role.")
+        assert "already exists" in result.lower()
+
+    async def test_create_agent_sanitises_name(self):
+        orch = _make_orchestrator()
+        tool = orch.tools._tools["create_agent"]
+        result = await tool.func(name="my agent", role="Custom role.")
+        # spaces replaced with underscores
+        assert "my_agent" in orch.sub_agents
+
+    async def test_do_spawn_returns_text(self):
+        from clawscope.memory import InMemoryMemory
+
+        # Mock a model that returns through the ReActAgent call stack
+        # We patch ReActAgent.__call__ to return a fixed Msg
+        orch = _make_orchestrator()
+
+        with patch("clawscope.agent.react.ReActAgent.__call__", new=AsyncMock(
+            return_value=Msg(name="s", content="dynamic result", role="assistant")
+        )):
+            result = await orch._do_spawn("You are an expert.", "Solve X.", register_as=None)
+        assert "dynamic result" in result
+
+    async def test_do_spawn_with_register_adds_sub_agent(self):
+        orch = _make_orchestrator()
+
+        with patch("clawscope.agent.react.ReActAgent.__call__", new=AsyncMock(
+            return_value=Msg(name="s", content="ok", role="assistant")
+        )):
+            await orch._do_spawn("Role.", "Task.", register_as="new_agent")
+
+        assert "new_agent" in orch.sub_agents
+        assert "ask_new_agent" in orch.tools._tools
+
+    async def test_spawn_agent_tool_invokes_do_spawn(self):
+        orch = _make_orchestrator()
+
+        with patch.object(orch, "_do_spawn", new=AsyncMock(return_value="spawned text")) as mock_spawn:
+            tool = orch.tools._tools["spawn_agent"]
+            result = await tool.func(role="Expert role.", task="Do the task.")
+
+        mock_spawn.assert_called_once_with("Expert role.", "Do the task.", register_as=None)
+        assert result == "spawned text"
+
+    async def test_spawn_agent_error_handled(self):
+        orch = _make_orchestrator()
+
+        with patch("clawscope.agent.react.ReActAgent.__call__", new=AsyncMock(
+            side_effect=RuntimeError("model error")
+        )):
+            result = await orch._do_spawn("Role.", "Task.", register_as=None)
+
+        assert "error" in result.lower()
+
+    def test_meta_tools_have_correct_parameters(self):
+        orch = _make_orchestrator()
+
+        spawn_tool = orch.tools._tools["spawn_agent"]
+        param_names = [p.name for p in spawn_tool.parameters]
+        assert "role" in param_names
+        assert "task" in param_names
+
+        create_tool = orch.tools._tools["create_agent"]
+        param_names = [p.name for p in create_tool.parameters]
+        assert "name" in param_names
+        assert "role" in param_names
+
+    def test_sys_prompt_mentions_spawn(self):
+        orch = _make_orchestrator()
+        assert "spawn_agent" in orch.sys_prompt
+
+    def test_sys_prompt_mentions_create_agent(self):
+        orch = _make_orchestrator()
+        assert "create_agent" in orch.sys_prompt

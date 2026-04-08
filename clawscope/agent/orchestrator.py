@@ -62,7 +62,21 @@ Guidelines
 4. Always be transparent: if a sub-agent produced an error, note it and
    try to work around it.
 
-Available sub-agents are listed as tools prefixed with ``ask_``.
+Dynamic agent creation
+----------------------
+You can also create new specialised agents on the fly:
+
+- ``spawn_agent(role, task)`` — spin up a temporary agent with the given role
+  description, run it on *task*, get the result, and discard it. Use this
+  when no pre-registered agent fits the task.
+
+- ``create_agent(name, role)`` — create a new agent and register it permanently
+  under *name*. From then on you can call it via ``ask_<name>``. Use this when
+  you expect to reuse the same role multiple times in the conversation.
+
+- ``list_agents()`` — see which sub-agents are currently registered.
+
+Pre-registered sub-agents are listed as tools prefixed with ``ask_``.
 """
 
 
@@ -135,6 +149,9 @@ class OrchestratorAgent(ReActAgent):
             else:
                 for agent in sub_agents:
                     self.register_sub_agent(agent)
+
+        # Register built-in meta-tools for dynamic agent creation
+        self._register_meta_tools()
 
     # ------------------------------------------------------------------
     # Sub-agent registration
@@ -230,6 +247,167 @@ class OrchestratorAgent(ReActAgent):
             ],
             func=_delegate,
             enabled=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Dynamic agent creation – meta-tools
+    # ------------------------------------------------------------------
+
+    def _register_meta_tools(self) -> None:
+        """Register the built-in spawn_agent / create_agent / list_agents tools."""
+        from clawscope.tool.registry import Tool, ToolParameter
+
+        # --- spawn_agent ---
+        async def _spawn_agent(role: str, task: str) -> str:
+            """Create a temporary specialised agent and run it on one task."""
+            return await self._do_spawn(role, task, register_as=None)
+
+        self.tools._tools["spawn_agent"] = Tool(
+            name="spawn_agent",
+            description=(
+                "Spin up a brand-new temporary agent with a custom role/personality "
+                "and run it on a single task. The agent is discarded afterwards.\n\n"
+                "Use this when the task requires a specialisation that no pre-registered "
+                "agent covers and you only need it once."
+            ),
+            parameters=[
+                ToolParameter(
+                    name="role",
+                    type="string",
+                    description=(
+                        "System prompt / role description for the new agent. "
+                        "Be specific: describe its expertise, communication style, "
+                        "and any constraints (e.g. 'You are a senior Python engineer …')."
+                    ),
+                    required=True,
+                ),
+                ToolParameter(
+                    name="task",
+                    type="string",
+                    description="The complete, self-contained task to give the new agent.",
+                    required=True,
+                ),
+            ],
+            func=_spawn_agent,
+            enabled=True,
+        )
+
+        # --- create_agent ---
+        async def _create_agent(name: str, role: str) -> str:
+            """Create a new agent and register it for reuse in this session."""
+            return await self._do_create_and_register(name, role)
+
+        self.tools._tools["create_agent"] = Tool(
+            name="create_agent",
+            description=(
+                "Create a new specialised agent and register it permanently under *name*. "
+                "Once registered it is callable via ask_<name> in future turns.\n\n"
+                "Use this when you anticipate needing the same specialisation multiple times."
+            ),
+            parameters=[
+                ToolParameter(
+                    name="name",
+                    type="string",
+                    description=(
+                        "Short identifier for the new agent (no spaces). "
+                        "It becomes available as the tool ask_<name>."
+                    ),
+                    required=True,
+                ),
+                ToolParameter(
+                    name="role",
+                    type="string",
+                    description="System prompt / role description for the new agent.",
+                    required=True,
+                ),
+            ],
+            func=_create_agent,
+            enabled=True,
+        )
+
+        # --- list_agents ---
+        async def _list_agents() -> str:
+            """Return the names of all currently registered sub-agents."""
+            names = list(self._sub_agents.keys())
+            if not names:
+                return "No sub-agents are currently registered."
+            lines = []
+            for n in names:
+                agent = self._sub_agents[n]
+                snippet = (getattr(agent, "sys_prompt", "") or "")[:80].replace("\n", " ")
+                lines.append(f"- {n}: {snippet}")
+            return "Registered sub-agents:\n" + "\n".join(lines)
+
+        self.tools._tools["list_agents"] = Tool(
+            name="list_agents",
+            description="List the names and roles of all currently registered sub-agents.",
+            parameters=[],
+            func=_list_agents,
+            enabled=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Dynamic agent execution helpers
+    # ------------------------------------------------------------------
+
+    async def _do_spawn(self, role: str, task: str, register_as: str | None) -> str:
+        """
+        Internal: create a ReActAgent with *role*, run *task*, return text result.
+
+        If *register_as* is given, also register the agent for future reuse.
+        """
+        from clawscope.memory import InMemoryMemory
+        from clawscope.tool import ToolRegistry
+        from clawscope.config import ToolsConfig
+
+        agent_name = register_as or f"_spawned_{len(self._sub_agents)}"
+
+        spawned = ReActAgent(
+            name=agent_name,
+            sys_prompt=role,
+            model=self.model,           # share the orchestrator's model
+            memory=InMemoryMemory(),    # fresh, isolated memory
+            tools=ToolRegistry(ToolsConfig()),  # no extra tools by default
+            max_iterations=self.max_iterations,
+        )
+
+        if register_as:
+            self.register_sub_agent(spawned, alias=register_as)
+            logger.info(
+                f"OrchestratorAgent '{self.name}': created and registered agent '{register_as}'"
+            )
+
+        logger.debug(
+            f"OrchestratorAgent '{self.name}': spawning '{agent_name}' "
+            f"for task ({len(task)} chars)"
+        )
+
+        msg = Msg(name=self.name, content=task, role="user")
+        try:
+            response = await spawned(msg)
+            if response is None:
+                return f"[{agent_name}] returned no response."
+            return response.get_text_content()
+        except Exception as exc:
+            logger.error(f"OrchestratorAgent: spawned agent '{agent_name}' error: {exc}")
+            return f"[{agent_name}] error: {exc}"
+
+    async def _do_create_and_register(self, name: str, role: str) -> str:
+        """Internal: create + register a new agent, return confirmation."""
+        # Sanitise name
+        safe_name = name.strip().replace(" ", "_")
+        if not safe_name:
+            return "Error: agent name must not be empty."
+        if safe_name in self._sub_agents:
+            return (
+                f"Agent '{safe_name}' already exists. "
+                f"Call ask_{safe_name} to use it, or choose a different name."
+            )
+
+        await self._do_spawn(role, task="", register_as=safe_name)
+        return (
+            f"Agent '{safe_name}' created and registered. "
+            f"You can now call it with ask_{safe_name}(message=...)."
         )
 
     # ------------------------------------------------------------------
