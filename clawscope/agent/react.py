@@ -292,7 +292,8 @@ class ReActAgent(AgentBase):
                 messages.append(assistant_msg)
                 await self.observe(assistant_msg)
 
-                # Execute tools
+                # Execute tools once, collecting results and yielding events
+                tool_results = []
                 for tc in tool_calls:
                     yield {
                         "type": "tool_start",
@@ -302,6 +303,11 @@ class ReActAgent(AgentBase):
 
                     try:
                         result = await self.execute_tool(tc.name, tc.arguments)
+                        tool_results.append({
+                            "tool_use_id": tc.id,
+                            "content": result,
+                            "is_error": False,
+                        })
                         yield {
                             "type": "tool_result",
                             "tool_id": tc.id,
@@ -309,16 +315,20 @@ class ReActAgent(AgentBase):
                             "is_error": False,
                         }
                     except Exception as e:
+                        error_msg = str(e)
+                        tool_results.append({
+                            "tool_use_id": tc.id,
+                            "content": error_msg,
+                            "is_error": True,
+                        })
                         yield {
                             "type": "tool_result",
                             "tool_id": tc.id,
-                            "content": str(e),
+                            "content": error_msg,
                             "is_error": True,
                         }
-                        result = f"Error: {str(e)}"
 
-                # Add tool results
-                tool_results = await self._execute_tools(tool_calls)
+                # Add tool results to conversation
                 tool_result_msg = self._create_tool_result_msg(tool_results)
                 messages.append(tool_result_msg)
                 await self.observe(tool_result_msg)

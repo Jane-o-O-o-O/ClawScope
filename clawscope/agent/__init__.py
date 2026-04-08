@@ -2,6 +2,7 @@
 
 from clawscope.agent.base import AgentBase
 from clawscope.agent.react import ReActAgent
+from clawscope.agent.orchestrator import OrchestratorAgent, create_orchestrator
 from clawscope.agent.user import UserAgent, ChannelUserAgent
 from clawscope.agent.a2a import (
     A2AAgent,
@@ -26,6 +27,8 @@ __all__ = [
     "AgentBase",
     # Agents
     "ReActAgent",
+    "OrchestratorAgent",
+    "create_orchestrator",
     "UserAgent",
     "ChannelUserAgent",
     "RealtimeAgent",

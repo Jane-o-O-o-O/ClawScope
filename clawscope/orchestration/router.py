@@ -24,6 +24,10 @@ class SessionRouter:
 
     Manages the lifecycle of agent sessions and coordinates
     message flow between channels and agents.
+
+    When sub-agents are registered (via :meth:`register_sub_agent`), each
+    new session receives an :class:`~clawscope.agent.OrchestratorAgent` that
+    automatically delegates to those sub-agents instead of a plain ReActAgent.
     """
 
     def __init__(
@@ -50,6 +54,34 @@ class SessionRouter:
         self._agents: dict[str, "AgentBase"] = {}
         self._running = False
         self._lock = asyncio.Lock()
+
+        # Sub-agents shared across all sessions (stateless per-call)
+        self._sub_agents: dict[str, "AgentBase"] = {}
+
+    # ------------------------------------------------------------------
+    # Sub-agent management
+    # ------------------------------------------------------------------
+
+    def register_sub_agent(self, name: str, agent: "AgentBase") -> None:
+        """
+        Register a sub-agent that the orchestrator can delegate to.
+
+        Calling this at least once switches all *future* sessions from a
+        plain ReActAgent to an :class:`~clawscope.agent.OrchestratorAgent`.
+        Existing sessions are not affected.
+
+        Args:
+            name: Logical name used as the tool key (``ask_<name>``).
+            agent: Agent instance to delegate to.
+        """
+        self._sub_agents[name] = agent
+        logger.info(f"SessionRouter: registered sub-agent '{name}'")
+
+    def unregister_sub_agent(self, name: str) -> bool:
+        """Remove a sub-agent. Returns True if it existed."""
+        existed = name in self._sub_agents
+        self._sub_agents.pop(name, None)
+        return existed
 
     async def run(self) -> None:
         """Run the router main loop."""
@@ -81,6 +113,13 @@ class SessionRouter:
         try:
             # Get or create agent for this session
             agent = await self._get_or_create_agent(session_key, inbound.channel, inbound.chat_id)
+
+            # Inject a fresh ProgressReporter so progress goes to this exact chat
+            from clawscope.agent.orchestrator import OrchestratorAgent, ProgressReporter
+            if isinstance(agent, OrchestratorAgent):
+                agent.set_progress_reporter(
+                    ProgressReporter(self.bus, inbound.channel, inbound.chat_id)
+                )
 
             # Convert to Msg
             msg = MessageAdapter.inbound_to_msg(inbound)
@@ -128,13 +167,40 @@ class SessionRouter:
         channel: str,
         chat_id: str,
     ) -> "AgentBase":
-        """Create a new agent for a session."""
-        # Get session
+        """Create a new agent for a session.
+
+        If sub-agents are registered, creates an OrchestratorAgent that
+        wraps them as tools. Otherwise falls back to the kernel's default agent.
+        """
         session = await self.sessions.get_or_create(session_key)
 
-        # Create memory from session
         from clawscope.memory import SessionMemory
         memory = SessionMemory(session)
+
+        if self._sub_agents:
+            # Orchestrator mode: build an OrchestratorAgent with a model
+            # sourced from the kernel (NativeKernel exposes model_registry).
+            from clawscope.agent.orchestrator import OrchestratorAgent
+
+            model = getattr(self.kernel, "model_registry", None)
+            if model is not None:
+                model = model.get_model()
+            else:
+                model = getattr(self.kernel, "model_config", None)
+
+            orchestrator = OrchestratorAgent(
+                name=self.config.name or "Orchestrator",
+                sys_prompt=self.config.sys_prompt or "",
+                model=model,
+                memory=memory,
+                sub_agents=dict(self._sub_agents),  # snapshot
+                max_iterations=self.config.max_iterations,
+            )
+            logger.info(
+                f"SessionRouter: created OrchestratorAgent for session '{session_key}' "
+                f"with {len(self._sub_agents)} sub-agent(s)"
+            )
+            return orchestrator
 
         return self.kernel.create_agent(
             name=self.config.name,
