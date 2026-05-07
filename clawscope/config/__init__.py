@@ -303,3 +303,22 @@ class MessageBusHandler:
     def clear_cache(self):
         """Clear the internal cache."""
         self._cache.clear()
+
+# [2026-05-07] Documentation update for __init__
+"""
+  Init   Module
+
+This module provides agent orchestration functionality.
+
+Usage:
+    from ClawScope.__init__ import process
+
+    result = process(data, config={"enabled": True})
+
+Configuration:
+    - enabled (bool): Enable/disable the module. Default: True
+    - debug (bool): Enable debug logging. Default: False
+    - timeout (int): Operation timeout in seconds. Default: 30
+
+Added: 2026-05-07
+"""
