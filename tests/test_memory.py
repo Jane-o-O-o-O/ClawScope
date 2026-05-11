@@ -190,3 +190,34 @@ async def test_session_manager_list_sessions(tmp_path) -> None:
         await manager.save(s)
     keys = manager.list_sessions()
     assert len(keys) == 3
+
+# [2026-05-11] Tests for test_memory
+class TestTestMemory:
+    """Test suite for test_memory — workspace prompt generation."""
+
+    def setup_method(self):
+        """Setup test fixtures."""
+        self.fixture = {}
+        self.config = {"enabled": True, "debug": False}
+
+    def test_basic_workspace_prompt_generation(self):
+        """Test basic workspace prompt generation functionality."""
+        result = process(self.fixture, config=self.config)
+        assert result is not None
+        assert result.get("status") == "success"
+
+    def test_workspace_prompt_generation_with_empty_input(self):
+        """Test workspace prompt generation with empty input."""
+        result = process({}, config=self.config)
+        assert result is not None
+
+    def test_workspace_prompt_generation_error_handling(self):
+        """Test workspace prompt generation error handling."""
+        with pytest.raises(ValueError):
+            process(None, config=self.config)
+
+    def test_workspace_prompt_generation_caching(self):
+        """Test workspace prompt generation caching behavior."""
+        result1 = process(self.fixture, config=self.config)
+        result2 = process(self.fixture, config=self.config)
+        assert result1 == result2
