@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
 from clawscope.app import ClawScope
-from clawscope.config import Config
 from clawscope._version import __version__
 
 
@@ -102,6 +101,31 @@ def get_app() -> ClawScope:
     return _app_instance
 
 
+def _serialize_stream_event(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Normalize app stream events into JSON-serializable SSE payloads."""
+    event_type = str(event.get("type", "content"))
+    payload = dict(event)
+
+    if event_type == "done":
+        message = payload.pop("message", None)
+        payload["content"] = message.get_text_content() if message is not None else ""
+
+    return event_type, payload
+
+
+def _encode_sse_event(event_type: str, payload: Any) -> str:
+    """Format one SSE event frame."""
+    data = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+    return f"event: {event_type}\ndata: {data}\n\n"
+
+
+def _render_console_page() -> str:
+    """Render a lightweight browser console for the API."""
+    from pathlib import Path
+
+    page = Path(__file__).resolve().parent / "static" / "console.html"
+    return page.read_text(encoding="utf-8")
+
 # ==================== FastAPI App ====================
 
 @asynccontextmanager
@@ -109,7 +133,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     global _app_instance
 
-    # Startup 鈥?create a default instance only when none was pre-configured
+    # Startup 閳?create a default instance only when none was pre-configured
     if _app_instance is None:
         logger.info("Starting ClawScope API server...")
         _app_instance = ClawScope.create()
@@ -177,6 +201,11 @@ def _register_routes(app: FastAPI) -> None:
         """Health check endpoint."""
         return {"status": "healthy", "version": __version__}
 
+    @app.get("/", response_class=HTMLResponse)
+    async def console():
+        """Serve the built-in web console."""
+        return HTMLResponse(_render_console_page())
+
     @app.get("/status", response_model=StatusResponse)
     async def status():
         """Get platform status."""
@@ -215,9 +244,9 @@ def _register_routes(app: FastAPI) -> None:
         """
         Stream chat response (SSE).
 
-        Each event is a JSON-encoded chunk.  Possible ``type`` values:
+        Each event is a named SSE frame. Possible event names:
         ``content``, ``thinking``, ``tool_start``, ``tool_result``, ``done``, ``error``.
-        The stream ends with the sentinel line ``data: [DONE]``.
+        The stream ends with an ``end`` event containing ``[DONE]``.
         """
         import json
         from fastapi.responses import StreamingResponse
@@ -231,20 +260,17 @@ def _register_routes(app: FastAPI) -> None:
                     agent_name=request.agent,
                     session_id=request.session_id,
                 ):
-                    event_type = event.get("type", "content")
-                    payload = dict(event)
-                    if event_type == "done":
-                        message = payload.pop("message", None)
-                        payload["content"] = (
-                            message.get_text_content() if message is not None else ""
-                        )
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    event_type, payload = _serialize_stream_event(event)
+                    yield _encode_sse_event(event_type, payload)
+                yield _encode_sse_event("end", "[DONE]")
             except Exception as e:
-                logger.error(f"Stream chat error: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-            finally:
-                yield "data: [DONE]\n\n"
-
+                yield _encode_sse_event(
+                    "error",
+                    {
+                        "type": "error",
+                        "error": str(e),
+                    },
+                )
         return StreamingResponse(
             generate(),
             media_type="text/event-stream",

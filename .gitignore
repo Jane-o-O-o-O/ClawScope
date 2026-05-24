@@ -95,6 +95,8 @@ dmypy.json
 Thumbs.db
 
 # Project specific
+.tmp*/
+pytest-cache-files-*/
 *.log
 logs/
 workspace/

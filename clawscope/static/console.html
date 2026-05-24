@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ClawScope Console</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --panel: rgba(15, 23, 42, 0.86);
+      --panel-2: rgba(30, 41, 59, 0.72);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --border: rgba(148, 163, 184, 0.18);
+      --accent-2: #22c55e;
+      --danger: #fb7185;
+      --shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(34, 197, 94, 0.12), transparent 24%),
+        linear-gradient(160deg, #020617 0%, #0f172a 50%, #111827 100%);
+      color: var(--text);
+      font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .shell { max-width: 1480px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; grid-template-columns: 320px minmax(0, 1fr); }
+    .topbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 14px; background: rgba(15, 23, 42, 0.62); backdrop-filter: blur(16px); box-shadow: var(--shadow); }
+    .brand h1 { margin: 0; font-size: 20px; }
+    .brand p, .muted { margin: 4px 0 0; color: var(--muted); }
+    .status { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: rgba(56, 189, 248, 0.12); color: #bae6fd; border: 1px solid rgba(56, 189, 248, 0.18); white-space: nowrap; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.12); }
+    .panel { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); backdrop-filter: blur(16px); box-shadow: var(--shadow); overflow: hidden; }
+    .panel h2 { margin: 0; padding: 16px 18px 10px; font-size: 15px; }
+    .stack { display: grid; gap: 12px; padding: 0 18px 18px; }
+    .field { display: grid; gap: 6px; }
+    label { color: var(--muted); font-size: 12px; }
+    input, textarea, button { font: inherit; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.18); background: rgba(15, 23, 42, 0.88); color: var(--text); }
+    input, textarea { width: 100%; padding: 11px 12px; outline: none; }
+    textarea { min-height: 120px; resize: vertical; }
+    .row { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { padding: 10px 14px; cursor: pointer; background: linear-gradient(135deg, rgba(56, 189, 248, 0.92), rgba(34, 197, 94, 0.86)); border: none; color: #020617; font-weight: 700; }
+    button.secondary { background: rgba(15, 23, 42, 0.85); color: var(--text); border: 1px solid rgba(148, 163, 184, 0.18); }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 0 18px 18px; }
+    .card { padding: 14px; border-radius: 12px; background: var(--panel-2); border: 1px solid rgba(148, 163, 184, 0.14); }
+    .card .value { font-size: 24px; font-weight: 700; margin-top: 8px; }
+    .layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
+    .section-grid { display: grid; gap: 20px; }
+    .mini-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .full { grid-column: 1 / -1; }
+    .workflow-block {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.52);
+      overflow: hidden;
+    }
+    .workflow-block h3 {
+      margin: 0;
+      padding: 14px 16px 8px;
+      font-size: 14px;
+      color: #e2e8f0;
+    }
+    .list { display: grid; gap: 10px; padding: 0 18px 18px; }
+    .list-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.72); }
+    .list-row code { color: #7dd3fc; }
+    .muted-code { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .feed { display: grid; gap: 10px; padding: 0 18px 18px; max-height: 650px; overflow: auto; }
+    .bubble { padding: 12px 14px; border-radius: 12px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(148, 163, 184, 0.14); }
+    .bubble .meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .bubble pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+    .error { color: var(--danger); }
+    @media (max-width: 1180px) { .shell { grid-template-columns: 1fr; } .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 720px) { .shell { padding: 12px; } .topbar { flex-direction: column; align-items: flex-start; } .row, .cards, .mini-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <h1>ClawScope Console</h1>
+        <p>API + agent control surface for chat, pipeline, hub, knowledge, and skills.</p>
+      </div>
+      <div class="status"><span class="dot"></span><span id="healthText">Connecting...</span></div>
+    </header>
+    <section class="panel">
+      <h2>Platform</h2>
+      <div class="cards">
+        <div class="card"><div class="muted">Version</div><div class="value" id="versionValue">-</div></div>
+        <div class="card"><div class="muted">Agents</div><div class="value" id="agentsValue">-</div></div>
+        <div class="card"><div class="muted">Knowledge</div><div class="value" id="knowledgeValue">-</div></div>
+        <div class="card"><div class="muted">Skills</div><div class="value" id="skillsValue">-</div></div>
+      </div>
+    </section>
+    <div class="section-grid">
+      <div class="layout">
+        <section class="panel">
+          <h2>Chat</h2>
+          <div class="stack">
+            <div class="row">
+              <div class="field"><label for="agentInput">Agent</label><input id="agentInput" value="default" /></div>
+              <div class="field"><label for="sessionInput">Session</label><input id="sessionInput" placeholder="optional" /></div>
+            </div>
+            <div class="field"><label for="messageInput">Message</label><textarea id="messageInput" placeholder="Type a prompt..."></textarea></div>
+            <div class="actions">
+              <button id="sendBtn">Send</button>
+              <button class="secondary" id="streamBtn">Stream</button>
+              <button class="secondary" id="clearBtn">Clear</button>
+            </div>
+          </div>
+          <div class="feed" id="feed"></div>
+        </section>
+        <aside class="panel">
+          <h2>System</h2>
+          <div class="stack">
+            <div class="field"><label>Health</label><div class="bubble"><pre id="healthBlock">Loading...</pre></div></div>
+            <div class="field"><label>Status</label><div class="bubble"><pre id="statusBlock">Loading...</pre></div></div>
+            <div class="field">
+              <label>Quick Views</label>
+              <div class="bubble"><pre id="quickSummary">Loading...</pre></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <section class="panel full">
+        <h2>Workflows</h2>
+        <div class="mini-grid">
+          <div class="workflow-block">
+            <h3>Agents</h3>
+            <div class="stack">
+              <div class="field"><label>New agent name</label><input id="newAgentName" placeholder="Assistant-2" /></div>
+              <div class="field"><label>System prompt</label><textarea id="newAgentPrompt" placeholder="You are a focused assistant."></textarea></div>
+              <div class="actions"><button id="refreshAgentsBtn" class="secondary">Refresh</button><button id="createAgentBtn">Create</button></div>
+            </div>
+            <div class="list" id="agentsList"></div>
+          </div>
+          <div class="workflow-block">
+            <h3>Knowledge</h3>
+            <div class="stack">
+              <div class="field"><label>Knowledge text</label><textarea id="knowledgeContent" placeholder="Add a note or document snippet."></textarea></div>
+              <div class="field"><label>Source</label><input id="knowledgeSource" placeholder="manual" /></div>
+              <div class="field"><label>Query</label><input id="knowledgeQuery" placeholder="Search knowledge base" /></div>
+              <div class="actions"><button id="addKnowledgeBtn">Add</button><button id="searchKnowledgeBtn" class="secondary">Search</button></div>
+            </div>
+            <div class="list" id="knowledgeResult"></div>
+          </div>
+          <div class="workflow-block">
+            <h3>Multi-Agent</h3>
+            <div class="stack">
+              <div class="field"><label>Pipeline agents</label><input id="pipelineAgents" value="default" /></div>
+              <div class="field"><label>Pipeline message</label><textarea id="pipelineMessage" placeholder="Start the pipeline..."></textarea></div>
+              <div class="field"><label>Hub agents</label><input id="hubAgents" value="default" /></div>
+              <div class="field"><label>Hub message</label><textarea id="hubMessage" placeholder="Start the hub conversation..."></textarea></div>
+              <div class="actions"><button id="runPipelineBtn">Run Pipeline</button><button id="runHubBtn" class="secondary">Run Hub</button></div>
+            </div>
+            <div class="list" id="workflowResult"></div>
+          </div>
+          <div class="workflow-block">
+            <h3>Skills</h3>
+            <div class="stack">
+              <div class="field"><label>Install skill</label><input id="skillName" placeholder="skill-name" /></div>
+              <div class="actions"><button id="refreshSkillsBtn" class="secondary">Refresh</button><button id="installSkillBtn">Install</button></div>
+            </div>
+            <div class="list" id="skillsList"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </div>
+  <script>
+    const feed = document.getElementById("feed");
+    const messageInput = document.getElementById("messageInput");
+    const agentInput = document.getElementById("agentInput");
+    const sessionInput = document.getElementById("sessionInput");
+    const healthText = document.getElementById("healthText");
+    const healthBlock = document.getElementById("healthBlock");
+    const statusBlock = document.getElementById("statusBlock");
+    const versionValue = document.getElementById("versionValue");
+    const agentsValue = document.getElementById("agentsValue");
+    const knowledgeValue = document.getElementById("knowledgeValue");
+    const skillsValue = document.getElementById("skillsValue");
+    const quickSummary = document.getElementById("quickSummary");
+    const agentsList = document.getElementById("agentsList");
+    const knowledgeResult = document.getElementById("knowledgeResult");
+    const workflowResult = document.getElementById("workflowResult");
+    const skillsList = document.getElementById("skillsList");
+    const newAgentName = document.getElementById("newAgentName");
+    const newAgentPrompt = document.getElementById("newAgentPrompt");
+    const knowledgeContent = document.getElementById("knowledgeContent");
+    const knowledgeSource = document.getElementById("knowledgeSource");
+    const knowledgeQuery = document.getElementById("knowledgeQuery");
+    const pipelineAgents = document.getElementById("pipelineAgents");
+    const pipelineMessage = document.getElementById("pipelineMessage");
+    const hubAgents = document.getElementById("hubAgents");
+    const hubMessage = document.getElementById("hubMessage");
+    const skillName = document.getElementById("skillName");
+    function addBubble(kind, title, content) {
+      const node = document.createElement("div");
+      node.className = "bubble";
+      if (kind === "error") node.classList.add("error");
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = title;
+      const body = document.createElement("pre");
+      body.textContent = content;
+      node.append(meta, body);
+      feed.appendChild(node);
+      feed.scrollTop = feed.scrollHeight;
+    }
+    function renderList(container, items, emptyText) {
+      container.replaceChildren();
+      if (!items.length) {
+        const node = document.createElement("div");
+        node.className = "bubble";
+        node.textContent = emptyText;
+        container.appendChild(node);
+        return;
+      }
+      for (const item of items) {
+        const node = document.createElement("div");
+        node.className = "list-row";
+        const label = document.createElement("code");
+        label.textContent = item.label;
+        const value = document.createElement("span");
+        value.className = "muted-code";
+        value.textContent = item.value;
+        node.append(label, value);
+        container.appendChild(node);
+      }
+    }
+    async function refreshStatus() {
+      const health = await fetch("/health").then(r => r.json());
+      const status = await fetch("/status").then(r => r.json());
+      const agents = await fetch("/agents").then(r => r.json()).catch(() => ({ agents: [] }));
+      const knowledgeBases = await fetch("/knowledge/bases").then(r => r.json()).catch(() => ({ knowledge_bases: [] }));
+      const skills = await fetch("/skills").then(r => r.json()).catch(() => ({ skills: [] }));
+      healthText.textContent = `${health.status} | ${health.version}`;
+      healthBlock.textContent = JSON.stringify(health, null, 2);
+      statusBlock.textContent = JSON.stringify(status, null, 2);
+      versionValue.textContent = health.version || "-";
+      agentsValue.textContent = String((status.agents || []).length);
+      knowledgeValue.textContent = String((status.knowledge_bases || []).length);
+      skillsValue.textContent = String((status.skills || []).length);
+      quickSummary.textContent = JSON.stringify({ agents: agents.agents || [], knowledge_bases: knowledgeBases.knowledge_bases || [], skills: (skills.skills || []).map(item => item.name || item) }, null, 2);
+      renderList(agentsList, (agents.agents || []).map(name => ({ label: name, value: "agent" })), "No agents registered yet.");
+      renderList(skillsList, (skills.skills || []).map(item => ({ label: item.name || item, value: item.category || "skill" })), "No skills installed.");
+    }
+    async function sendChat(stream) {
+      const body = {
+        message: messageInput.value.trim(),
+        agent: agentInput.value.trim() || "default",
+        session_id: sessionInput.value.trim() || null,
+      };
+      if (!body.message) return;
+      addBubble("user", "You", body.message);
+      if (!stream) {
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).then(r => r.json());
+        addBubble("assistant", response.agent || "Assistant", response.response || "");
+        return;
+      }
+      const response = await fetch("/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let assistant = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() || "";
+        for (const chunk of chunks) {
+          const lines = chunk.split("\n");
+          const event = lines.find(line => line.startsWith("event: "))?.slice(7) || "message";
+          const data = lines.find(line => line.startsWith("data: "))?.slice(6) || "";
+          if (event === "content" || event === "done") {
+            try {
+              const parsed = JSON.parse(data);
+              assistant = parsed.content || assistant;
+            } catch (_) {}
+          }
+          if (event === "error") addBubble("error", "Error", data);
+          if (event === "end") addBubble("assistant", "Assistant", assistant || "[DONE]");
+        }
+      }
+    }
+    async function postJson(url, body) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return response.json();
+    }
+    document.getElementById("sendBtn").onclick = () => sendChat(false).catch(err => addBubble("error", "Error", String(err)));
+    document.getElementById("streamBtn").onclick = () => sendChat(true).catch(err => addBubble("error", "Error", String(err)));
+    document.getElementById("clearBtn").onclick = () => { feed.replaceChildren(); };
+    document.getElementById("refreshAgentsBtn").onclick = () => refreshStatus().catch(err => addBubble("error", "Status", String(err)));
+    document.getElementById("createAgentBtn").onclick = () => postJson("/agents", { name: newAgentName.value.trim(), system_prompt: newAgentPrompt.value.trim() || null }).then(refreshStatus).catch(err => addBubble("error", "Agents", String(err)));
+    document.getElementById("addKnowledgeBtn").onclick = () => postJson("/knowledge", { content: knowledgeContent.value.trim(), source: knowledgeSource.value.trim() || null, kb_name: "default" }).then(refreshStatus).catch(err => addBubble("error", "Knowledge", String(err)));
+    document.getElementById("searchKnowledgeBtn").onclick = () => postJson("/knowledge/search", { query: knowledgeQuery.value.trim(), top_k: 5, kb_name: "default" }).then(result => { renderList(knowledgeResult, (result.results || []).map(item => ({ label: item.source || "match", value: item.content || JSON.stringify(item) })), "No results."); }).catch(err => addBubble("error", "Knowledge", String(err)));
+    document.getElementById("runPipelineBtn").onclick = () => postJson("/pipeline", { agents: pipelineAgents.value.split(",").map(s => s.trim()).filter(Boolean), message: pipelineMessage.value.trim() }).then(result => { renderList(workflowResult, [{ label: "pipeline", value: JSON.stringify(result.result ?? result) }], "Pipeline finished."); }).catch(err => addBubble("error", "Pipeline", String(err)));
+    document.getElementById("runHubBtn").onclick = () => postJson("/hub", { agents: hubAgents.value.split(",").map(s => s.trim()).filter(Boolean), initial_message: hubMessage.value.trim(), max_rounds: 5 }).then(result => { renderList(workflowResult, (result.messages || []).map(item => ({ label: item.name, value: item.content })), "Hub finished."); }).catch(err => addBubble("error", "Hub", String(err)));
+    document.getElementById("installSkillBtn").onclick = () => postJson("/skills/install", { name: skillName.value.trim() }).then(refreshStatus).catch(err => addBubble("error", "Skills", String(err)));
+    document.getElementById("refreshSkillsBtn").onclick = () => refreshStatus().catch(err => addBubble("error", "Status", String(err)));
+    refreshStatus().catch(err => {
+      healthText.textContent = "offline";
+      addBubble("error", "Status", String(err));
+    });
+  </script>
+</body>
+</html>

@@ -251,9 +251,13 @@ class ModelRegistry:
                 for keyword in provider.keywords:
                     if keyword in model_lower:
                         return provider
+            return None
 
         # Check environment variables
-        for provider in self._providers.values():
+        for provider in sorted(
+            self._providers.values(),
+            key=lambda spec: 1 if spec.name == "openai" else 0,
+        ):
             if provider.env_key and os.environ.get(provider.env_key):
                 return provider
 

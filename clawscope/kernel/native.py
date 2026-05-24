@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from clawscope.agent import ReActAgent
+from clawscope.agent.react import ReActAgent
 from clawscope.config import AgentConfig
 from clawscope.kernel.loop import LoopConfig, NativeAgentLoop
 from clawscope.memory import InMemoryMemory, MemoryBase

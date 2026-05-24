@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from clawscope.agent import AgentBase
+from clawscope.agent.base import AgentBase
 from clawscope.config import AgentConfig
 from clawscope.kernel.loop import AgentLoop
 from clawscope.memory import MemoryBase

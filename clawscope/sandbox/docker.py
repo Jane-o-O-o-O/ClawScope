@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import tarfile
 import io
+import tarfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +13,7 @@ from loguru import logger
 
 from clawscope.sandbox.base import Sandbox, SandboxResult, SandboxStatus
 from clawscope.sandbox.config import SandboxConfig
+from clawscope.sandbox.direct import execute_direct_command
 
 try:
     import aiodocker
@@ -138,7 +139,7 @@ class DockerSandbox(Sandbox):
         if not self.config.enabled:
             # Fall back to direct execution with warning
             logger.warning("Sandbox disabled, executing directly (unsafe)")
-            return await self._execute_direct(command, timeout)
+            return await self._execute_direct(command, timeout, env=env, cwd=cwd)
 
         if not self._container:
             await self.start()
@@ -371,55 +372,21 @@ class DockerSandbox(Sandbox):
         return int(memory)
 
     async def _execute_direct(
-        self, command: str, timeout: int | None
+        self,
+        command: str,
+        timeout: int | None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> SandboxResult:
         """Execute command directly without sandbox (fallback)."""
-        timeout = timeout or 60
-        started_at = datetime.now()
-
-        try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                finished_at = datetime.now()
-                return SandboxResult(
-                    status=SandboxStatus.TIMEOUT,
-                    error=f"Command timed out after {timeout} seconds",
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    duration_ms=(finished_at - started_at).total_seconds() * 1000,
-                )
-
-            finished_at = datetime.now()
-            return SandboxResult(
-                stdout=stdout.decode("utf-8", errors="replace"),
-                stderr=stderr.decode("utf-8", errors="replace"),
-                exit_code=process.returncode or 0,
-                status=SandboxStatus.COMPLETED,
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=(finished_at - started_at).total_seconds() * 1000,
-            )
-
-        except Exception as e:
-            finished_at = datetime.now()
-            return SandboxResult(
-                status=SandboxStatus.ERROR,
-                error=str(e),
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=(finished_at - started_at).total_seconds() * 1000,
-            )
+        return await execute_direct_command(
+            command=command,
+            timeout=timeout,
+            env=env,
+            cwd=cwd,
+            workspace_path=self.config.workspace_path,
+            sandbox_working_dir=self.config.working_dir,
+        )
 
 
 __all__ = ["DockerSandbox", "DOCKER_AVAILABLE"]
