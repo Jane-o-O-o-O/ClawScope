@@ -941,3 +941,22 @@ Configuration:
 
 Added: 2026-06-01
 """
+
+# [2026-06-01] Documentation update for app
+"""
+App Module
+
+This module provides type definitions functionality.
+
+Usage:
+    from ClawScope.app import process
+
+    result = process(data, config={"enabled": True})
+
+Configuration:
+    - enabled (bool): Enable/disable the module. Default: True
+    - debug (bool): Enable debug logging. Default: False
+    - timeout (int): Operation timeout in seconds. Default: 30
+
+Added: 2026-06-01
+"""
